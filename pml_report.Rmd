@@ -1,0 +1,204 @@
+---
+title: "Practical Machine Learning Course Project"
+output:
+  html_document:
+    keep_md: yes
+---
+
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+
+
+```{recho = TRUE}
+options( warn = -1 )
+library(caret)
+library(kernlab)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+```{recho = TRUE}
+# Download the training and test data and save them in the data folder.
+
+#if(!file.exists("data")){dir.create("data")}
+#trainingDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#testingDataURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#if (!file.exists("pml-training.csv")) {
+    #download.file(trainingDataURL, destfile="./data/pml-training.csv")
+#}
+
+#if (!file.exists("pml-testing.csv")) {
+    #download.file(testingDataURL, destfile="./data/pml-testing.csv")
+#}
+```
+
+```{recho = TRUE}
+# load the data as dataframe.
+trainingData <- read.csv("./data/pml-training.csv") 
+testingData <- read.csv("./data/pml-testing.csv") 
+
+
+# check the structure of the dataframe
+#str(trainingData)
+#str(testingData)
+```
+
+
+```{recho = TRUE}
+dim(trainingData)
+dim(testingData)
+
+```
+
+The training data has 19622 observations with 160 categories/variables and the testing data has 20 observations with 160 variables. The "classe" category is the prediction variable. 
+
+
+###Data Cleaning
+
+The data has missing values (NA) and some variables that have no use for prediction. using the following R script, first we remove the missing valuses, then remove the categories with timestamp and window columns from the training and testing data.
+
+```{recho = TRUE}  
+sum(complete.cases(trainingData))
+sum(complete.cases(testingData))
+
+# Remove missing values, NA
+trainingData <- trainingData[, colSums(is.na(trainingData)) == 0]
+testingData <- testingData[, colSums(is.na(testingData)) == 0]
+
+classe <- trainingData$classe
+remove_from_training <- grepl("^X|timestamp|window", names(trainingData))
+trainingData<- trainingData[, !remove_from_training]
+trainTidy <- trainingData[, sapply(trainingData, is.numeric)]
+trainTidy$classe <- classe
+
+remove_from_testing <- grepl("^X|timestamp|window", names(testingData ))
+testingData <- testingData[, !remove_from_testing]
+testTidy <- testingData[, sapply(testingData, is.numeric)]
+
+#str(trainTidy)
+#str(testTidy )
+
+```
+
+
+```{recho = TRUE}
+dim(trainTidy)
+dim(testTidy )
+
+```
+
+Now, the tidy training data has 19622 observations with 53 variables and the tidy testing data has 20 observations and 53 variables.
+
+###Data Slicing
+
+In this step we use data slicing to later perform cross-validation within the training set inorder to evaluate the models. Therefore, we split the data based on the classe variable to allocate 70% of tidy training data for training set and the other 30% for testing set. 
+
+```{recho = TRUE}
+set.seed(376259) # for reproducibility
+inTrain <- createDataPartition(trainTidy$classe, p=0.70, list=F)
+trainData <- trainTidy[inTrain, ]
+testData <- trainTidy[-inTrain, ]
+
+```
+
+###Model comparison
+
+Now we can compare three models: kernlab, rpart and random forests by estimating their performances on the validation data set and estimate their prediction errors with cross-validation.
+
+#### First Model : Using kernlab to fit a support vector machine with a laplacian kernel and predict for testing set
+
+```{recho = TRUE}   
+svmFit <- ksvm(classe ~ ., data = trainData, kernel = "laplacedot", C = 50)
+svmPredict <- predict(svmFit, testData, type = "response")
+confusionMatrix(testData$classe, svmPredict)
+svm_Accuracy <- postResample(svmPredict, testData$classe)
+svm_Accuracy
+
+```
+
+
+#### Second Model : Using rpart to build a decision tree and predict for testing set
+
+
+```{recho = TRUE} 
+rpartFit <- train(classe ~ ., data = trainData, method = "rpart")
+rpartPredict <- predict(rpartFit, testData, type = "raw")
+confusionMatrix(testData$classe, rpartPredict)
+rpart_Accuracy <- postResample(rpartPredict, testData$classe)
+rpart_Accuracy
+```
+
+
+#### Third Model : Using  randomForest to fit a forest with 300 trees and predict for testing set
+
+
+```{recho = TRUE} 
+rfFit <- randomForest(classe ~ ., data = trainData, ntree = 300)
+rfPredict <- predict(rfFit, testData, type = "response")
+confusionMatrix(testData$classe, rfPredict)
+rf_Accuracy <- postResample(rfPredict, testData$classe)
+rf_Accuracy
+```
+
+**From the above three models we choose to use Random Forest for its higher accuracy for Predicting using the test data. Also, we quantify the accuracy of the model and the out of sample error (oose).**
+
+
+```{recho = TRUE} 
+
+accuracy <- postResample(rfPredict, testData$classe)
+accuracy
+
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, rfPredict)$overall[1])
+oose
+
+answers <- predict(rfFit, testTidy[, -length(names(testTidy))])
+
+```
+
+```{recho = TRUE}
+# create files for the character vector (answers) with the 20 predictions in order for the 20 problems for submission.
+# prediction assignment submission text files in ans_files folder
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("ans_files/problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(answers)
+
+```
+
+
+
+###Appendix
+
+
+####Plot rfFit vs Error for the 300 trees used in  Random Forest
+
+```{recho = TRUE} 
+plot(rfFit)
+dev.copy(png, file = "./figure/rffit.png") 
+dev.off() 
+```
+
+
+
+####Plot  the decision tree Visualization diagram using rpart
+
+
+```{recho = TRUE} 
+dtree <- rpart(classe ~ ., data=trainData, method="class")
+prp(dtree) 
+dev.copy(png, file = "./figure/dtree.png") 
+dev.off() 
+```
+
